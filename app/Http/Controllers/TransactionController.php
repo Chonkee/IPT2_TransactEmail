@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SendEmail;
 use App\Models\Transaction;
 use App\Models\Account;
 use Illuminate\Http\Request;
@@ -46,7 +47,7 @@ class TransactionController extends Controller
 
         DB::transaction(function () use ($validated) {
             $account = Account::findOrFail($validated['account_id']);
-            
+
             // Calculate new balance based on transaction type
             if ($validated['type'] === 'disbursement') {
                 // For disbursement, this adds to what customer owes (shouldn't normally happen after account creation)
@@ -70,14 +71,16 @@ class TransactionController extends Controller
                 'processed_by' => Auth::id(),
             ]);
 
+            dispatch(new SendEmail($account));
+
             // Update account balance
             $account->balance = $newBalance;
-            
+
             // Update account status if fully paid
             if ($newBalance <= 0) {
                 $account->status = 'paid';
             }
-            
+
             $account->save();
         });
 
@@ -127,21 +130,21 @@ class TransactionController extends Controller
     {
         DB::transaction(function () use ($transaction) {
             $account = $transaction->account;
-            
+
             // Reverse the transaction effect on account balance
             if ($transaction->type === 'disbursement') {
                 $account->balance -= $transaction->amount;
             } else {
                 $account->balance += $transaction->amount;
             }
-            
+
             // Update account status
             if ($account->balance > 0 && $account->status === 'paid') {
                 $account->status = 'active';
             }
-            
+
             $account->save();
-            
+
             // Delete the transaction
             $transaction->delete();
         });
